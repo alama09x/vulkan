@@ -148,7 +148,7 @@ typedef struct {
         uint32_t formatCount;
         VkSurfaceFormatKHR formats[256];
         uint32_t presentModeCount;
-        VkPresentModeKHR presentModes[256];
+        VkPresentModeKHR presentModes[4];
 } SwapChainSupportDetails;
 
 static const SwapChainSupportDetails querySwapChainSupport(
@@ -422,6 +422,132 @@ static const Result createLogicalDevice(App *app)
         return RESULT_SUCCESS;
 }
 
+static const VkSurfaceFormatKHR chooseSwapSurfaceFormat(
+        const VkSurfaceFormatKHR *availableFormats,
+        uint32_t formatCount
+) {
+        for (int i = 0; i < formatCount; i++) {
+                if (availableFormats[i].format == VK_FORMAT_B8G8R8A8_SRGB)
+                        return availableFormats[i];
+        }
+
+        return availableFormats[0];
+}
+
+static const VkPresentModeKHR chooseSwapPresentMode(
+        const VkPresentModeKHR *availablePresentModes,
+        uint32_t presentModeCount
+) {
+        for (int i = 0; i < presentModeCount; i++)  {
+                if (availablePresentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+                        return availablePresentModes[i];
+        }
+
+        return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+static const VkExtent2D chooseSwapExtent(
+        GLFWwindow *window,
+        const VkSurfaceCapabilitiesKHR capabilities
+) {
+        if (capabilities.currentExtent.width != UINT32_MAX)
+                return capabilities.currentExtent;
+
+        int width;
+        int height;
+        glfwGetFramebufferSize(window, &width, &height);
+        return (VkExtent2D) {
+                .width = capabilities.currentExtent.width < width
+                        ? capabilities.currentExtent.width
+                        : (uint32_t) width,
+                .height = capabilities.currentExtent.height < height
+                        ? capabilities.currentExtent.height
+                        :(uint32_t) height,
+        };
+}
+
+static const Result createSwapChain(App *app)
+{
+        const SwapChainSupportDetails swapChainSupport = querySwapChainSupport(
+                app->physicalDevice,
+                app->surface
+        );
+
+        const VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(
+                swapChainSupport.formats,
+                swapChainSupport.formatCount
+        );
+
+        const VkPresentModeKHR presentMode = chooseSwapPresentMode(
+                swapChainSupport.presentModes,
+                swapChainSupport.presentModeCount
+        );
+
+        const VkExtent2D extent = chooseSwapExtent(
+                app->window,
+                swapChainSupport.capabilities
+        );
+
+        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+        if (swapChainSupport.capabilities.maxImageCount > 0
+                && imageCount > swapChainSupport.capabilities.maxImageCount
+        ) {
+                
+                imageCount = swapChainSupport.capabilities.maxImageCount;
+        }
+
+        QueueFamilyIndices indices = findQueueFamilies(
+                app->physicalDevice,
+                app->surface
+        );
+
+        uint32_t queueFamilyIndices[] = {
+                indices.graphicsFamily,
+                indices.presentFamily,
+        };
+
+        VkSwapchainCreateInfoKHR createInfo = {
+                .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                .surface = app->surface,
+                .minImageCount = imageCount,
+                .imageFormat = surfaceFormat.format,
+                .imageColorSpace = surfaceFormat.colorSpace,
+                .imageExtent = extent,
+                .imageArrayLayers = 1,
+                .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                .preTransform = swapChainSupport.capabilities.currentTransform,
+                .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                .presentMode = presentMode,
+                .clipped = VK_TRUE,
+                .oldSwapchain = VK_NULL_HANDLE,
+        };
+
+        if (indices.graphicsFamily != indices.presentFamily) {
+                createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+                createInfo.queueFamilyIndexCount = 2;
+                createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        } else {
+                createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                createInfo.queueFamilyIndexCount = 0; // optional
+        }
+
+        const VkResult result = vkCreateSwapchainKHR(
+                app->device,
+                &createInfo,
+                NULL,
+                &app->swapChain
+        );
+
+        if (result != VK_SUCCESS) {
+                return (Result) {
+                        .code = result,
+                        .data = "failed to create swap chain!",
+                };
+        }
+        
+        return RESULT_SUCCESS;
+}
+
 static const Result initVulkan(App *app)
 {
         Result res;
@@ -430,6 +556,7 @@ static const Result initVulkan(App *app)
         handle(createSurface(app));
         handle(pickPhysicalDevice(app));
         handle(createLogicalDevice(app));
+        handle(createSwapChain(app));
         return RESULT_SUCCESS;
 }
 
@@ -443,6 +570,7 @@ static const Result mainLoop(App *app)
 
 static const Result cleanUp(App *app)
 {
+        vkDestroySwapchainKHR(app->device, app->swapChain, NULL);
         if (ENABLE_VALIDATION_LAYERS) {
                 destroyDebugUtilsMessengerEXT(
                         app->instance,

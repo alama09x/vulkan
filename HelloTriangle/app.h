@@ -13,6 +13,7 @@ typedef struct app {
         VkDevice device;
         VkQueue graphicsQueue;
         VkQueue presentQueue;
+        VkSwapchainKHR swapChain;
 } App;
 
 typedef struct result {

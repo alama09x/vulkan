@@ -1,6 +1,7 @@
 #ifndef APP_H
 #define APP_H
 
+#include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -22,6 +23,12 @@ typedef struct app {
         VkRenderPass renderPass;
         VkPipelineLayout pipelineLayout;
         VkPipeline graphicsPipeline;
+        VkFramebuffer *swapchainFramebuffers;
+        VkCommandPool commandPool;
+        VkCommandBuffer commandBuffer;
+        VkSemaphore imageAvailableSemaphore;
+        VkSemaphore renderFinishedSemaphore;
+        VkFence inFlightFence;
 } App;
 
 typedef struct result {

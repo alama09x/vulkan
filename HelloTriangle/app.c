@@ -18,6 +18,8 @@
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
 
+#define RESULT_ERROR(c, msg) (Result) { .code = c, .data = msg }
+
 const Result RESULT_SUCCESS = (Result) {
         .code = 0,
         .data = NULL,
@@ -78,12 +80,8 @@ static void checkExtensions(const char **extensions, uint32_t extCount)
 static const Result createInstance(App *app)
 {
         printf("In debug mode: %s\n", ENABLE_VALIDATION_LAYERS ? "true" : "false");
-        if (ENABLE_VALIDATION_LAYERS && !checkValidationLayerSupport()) {
-                return (Result) {
-                        .code = -1,
-                        .data = "validation layers requested, but not available!",
-                };
-        }
+        if (ENABLE_VALIDATION_LAYERS && !checkValidationLayerSupport())
+                return RESULT_ERROR(-1, "validation layers requested, but not available!");
 
         const VkApplicationInfo appInfo = {
                 .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -116,12 +114,8 @@ static const Result createInstance(App *app)
         }
 
         VkResult result = vkCreateInstance(&createInfo, NULL, &app->instance);
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create instance!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create instance!");
         
         return RESULT_SUCCESS;
 }
@@ -134,12 +128,8 @@ static const Result createSurface(App *app)
                 NULL, &app->surface
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create window surface!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create window surface!");
 
         return RESULT_SUCCESS;
 }
@@ -309,12 +299,8 @@ static const Result pickPhysicalDevice(App *app)
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(app->instance, &deviceCount, NULL);
 
-        if (deviceCount == 0) {
-                return (Result) {
-                        .code = -1,
-                        .data = "failed to find GPUs with Vulkan support!",
-                };
-        }
+        if (deviceCount == 0)
+                return RESULT_ERROR(-1, "failed to find GPUs with Vulkan support!");
 
         VkPhysicalDevice devices[deviceCount];
         vkEnumeratePhysicalDevices(app->instance, &deviceCount, devices);
@@ -326,12 +312,8 @@ static const Result pickPhysicalDevice(App *app)
                 }
         }
 
-        if (app->physicalDevice == NULL) {
-                return (Result) {
-                        .code = -1,
-                        .data = "failed to find a suitable GPU!",
-                };
-        }
+        if (app->physicalDevice == NULL)
+                return RESULT_ERROR(-1, "failed to find a suitable GPU!");
         
         return RESULT_SUCCESS;
 }
@@ -399,12 +381,8 @@ static const Result createLogicalDevice(App *app)
                 &app->device
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create logical device!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create logical device!");
 
         vkGetDeviceQueue(
                 app->device,
@@ -539,12 +517,8 @@ static const Result createSwapChain(App *app)
                 &app->swapchain
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create swap chain!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create swapchain!");
 
         vkGetSwapchainImagesKHR(app->device, app->swapchain, &imageCount, NULL);
         app->swapchainImageCount = imageCount;
@@ -596,12 +570,8 @@ static const Result createImageViews(App *app)
                         &app->swapchainImageViews[i]
                 );
 
-                if (result != VK_SUCCESS) {
-                        return (Result) {
-                                .code = result,
-                                .data = "failed to create image views!",
-                        };
-                }
+                if (result != VK_SUCCESS)
+                        return RESULT_ERROR(result, "failed to create image views!");
         }
         return RESULT_SUCCESS;
 }
@@ -612,10 +582,7 @@ static const Result readFile(const char *fname, uint32_t *pfsize)
         if (!fp) {
                 char errmsg[64];
                 sprintf(errmsg, "failed to open file: %s", fname);
-                return (Result) {
-                        .code = -1,
-                        .data = errmsg
-                };
+                return RESULT_ERROR(-1, errmsg);
         }
 
         fseek(fp, 0l, SEEK_END);
@@ -652,12 +619,8 @@ static const Result createShaderModule(
                 &shaderModule
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create shader module!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create shader module!");
 
         return (Result) {
                 .code = 0,
@@ -689,12 +652,23 @@ static const Result createRenderPass(App *app)
                 .pColorAttachments = &colorAttachmentRef,
         };
 
+        const VkSubpassDependency dependency = {
+                .srcSubpass = VK_SUBPASS_EXTERNAL,
+                .dstSubpass = 0,
+                .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .srcAccessMask = 0,
+                .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        };
+
         const VkRenderPassCreateInfo renderPassInfo = {
                 .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                 .attachmentCount = 1,
                 .pAttachments = &colorAttachment,
                 .subpassCount = 1,
                 .pSubpasses = &subpass,
+                .dependencyCount = 1,
+                .pDependencies = &dependency,
         };
 
         const VkResult result = vkCreateRenderPass(
@@ -704,12 +678,8 @@ static const Result createRenderPass(App *app)
                 &app->renderPass
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create render pass!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create render pass!");
 
         return RESULT_SUCCESS;
 }
@@ -861,10 +831,10 @@ static const Result createGraphicsPipeline(App *app)
         );
 
         if (pipelineLayoutResult != VK_SUCCESS) {
-                return (Result) {
-                        .code = pipelineLayoutResult,
-                        .data = "failed to create pipeline layout!",
-                };
+                return RESULT_ERROR(
+                        pipelineLayoutResult,
+                        "failed to create pipeline layout!"
+                );
         }
 
         const VkGraphicsPipelineCreateInfo pipelineInfo = {
@@ -895,17 +865,201 @@ static const Result createGraphicsPipeline(App *app)
                 &app->graphicsPipeline
         );
 
-        if (result != VK_SUCCESS) {
-                return (Result) {
-                        .code = result,
-                        .data = "failed to create graphics pipeline!",
-                };
-        }
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create graphics pipeline!");
 
         vkDestroyShaderModule(app->device, fragShaderModule, NULL);
         vkDestroyShaderModule(app->device, vertShaderModule, NULL);
         free(fragShaderCode);
         free(vertShaderCode);
+        return RESULT_SUCCESS;
+}
+
+static const Result createFramebuffers(App *app)
+{
+        app->swapchainFramebuffers = malloc(
+                app->swapchainImageCount * sizeof(VkFramebuffer)
+        );
+
+        for (int i = 0; i < app->swapchainImageCount; i++) {
+                const VkImageView attachments[] = {
+                        app->swapchainImageViews[i],
+                };
+
+                const VkFramebufferCreateInfo createInfo = {
+                        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                        .renderPass = app->renderPass,
+                        .attachmentCount = 1,
+                        .pAttachments = attachments,
+                        .width = app->swapchainExtent.width,
+                        .height = app->swapchainExtent.height,
+                        .layers = 1,
+                };
+
+                VkResult result = vkCreateFramebuffer(
+                        app->device,
+                        &createInfo,
+                        NULL,
+                        &app->swapchainFramebuffers[i]
+                );
+
+                if (result != VK_SUCCESS)
+                        return RESULT_ERROR(result, "failed to create framebuffer!");
+        }
+
+        return RESULT_SUCCESS;
+}
+
+static const Result createCommandPool(App *app)
+{
+        const QueueFamilyIndices queueFamilyIndices = findQueueFamilies(
+                app->physicalDevice,
+                app->surface
+        );
+
+        const VkCommandPoolCreateInfo createInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = queueFamilyIndices.graphicsFamily,
+        };
+
+        const VkResult result = vkCreateCommandPool(
+                app->device,
+                &createInfo,
+                NULL,
+                &app->commandPool
+        );
+
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to create command pool");
+        
+        return RESULT_SUCCESS;
+}
+
+static const Result createCommandBuffer(App *app)
+{
+        const VkCommandBufferAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = app->commandPool,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1,
+        };
+
+        const VkResult result = vkAllocateCommandBuffers(
+                app->device,
+                &allocInfo,
+                &app->commandBuffer
+        );
+
+        if (result != VK_SUCCESS)
+                return RESULT_ERROR(result, "failed to allocate command buffers!");
+
+        return RESULT_SUCCESS;
+}
+
+static const Result recordCommandBuffer(
+        App *app,
+        VkCommandBuffer commandBuffer,
+        uint32_t imageIndex
+) {
+        const VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = 0, // optional
+                .pInheritanceInfo = NULL, // optional
+        };
+
+        const VkResult commandBufferBeginResult = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        if (commandBufferBeginResult != VK_SUCCESS) {
+                return RESULT_ERROR(
+                        commandBufferBeginResult,
+                        "failed to begin recording command buffer!"
+                );
+        }
+
+        const VkClearValue clearColor = {{{ 0.0f, 0.0f, 0.0f, 1.0f }}};
+        VkRenderPassBeginInfo renderPassInfo = {
+                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                .renderPass = app->renderPass,
+                .framebuffer = app->swapchainFramebuffers[imageIndex],
+                .renderArea = {
+                        .offset = { .x = 0, .y = 0 },
+                        .extent = app->swapchainExtent,
+                },
+                .clearValueCount = 1,
+                .pClearValues = &clearColor,
+        };
+
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
+
+        const VkViewport viewport = {
+                .x = 0.0f,
+                .y = 0.0f,
+                .width = (float) app->swapchainExtent.width,
+                .height = (float) app->swapchainExtent.height,
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f,
+        };
+
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        const VkRect2D scissor = {
+                .offset = { .x = 0, .y = 0 },
+                .extent = app->swapchainExtent,
+        };
+
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(commandBuffer);
+
+        const VkResult cmdBufResult = vkEndCommandBuffer(commandBuffer);
+        if (cmdBufResult != VK_SUCCESS)
+                return RESULT_ERROR(cmdBufResult, "failed to record command buffer!");
+        
+        return RESULT_SUCCESS;
+}
+
+static const Result createSyncObjects(App *app)
+{
+        VkSemaphoreCreateInfo semaphoreInfo = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        };
+
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+        };
+
+        const VkResult imageAvailableSemaphoreResult = vkCreateSemaphore(
+                app->device,
+                &semaphoreInfo,
+                NULL,
+                &app->imageAvailableSemaphore
+        );
+        const VkResult renderFinishedSemaphoreResult = vkCreateSemaphore(
+                app->device,
+                &semaphoreInfo,
+                NULL,
+                &app->renderFinishedSemaphore
+        );
+        const VkResult inFlightFenceResult = vkCreateFence(
+                app->device,
+                &fenceInfo,
+                NULL,
+                &app->inFlightFence
+        );
+
+        if (imageAvailableSemaphoreResult != VK_SUCCESS
+                && renderFinishedSemaphoreResult != VK_SUCCESS
+                && inFlightFenceResult != VK_SUCCESS
+        ) {
+                return RESULT_ERROR(
+                        inFlightFenceResult,
+                        "failed to create semaphores and fence!"
+                );
+        }
+
         return RESULT_SUCCESS;
 }
 
@@ -921,6 +1075,72 @@ static const Result initVulkan(App *app)
         handle(createImageViews(app));
         handle(createRenderPass(app));
         handle(createGraphicsPipeline(app));
+        handle(createFramebuffers(app));
+        handle(createCommandPool(app));
+        handle(createCommandBuffer(app));
+        handle(createSyncObjects(app));
+        return RESULT_SUCCESS;
+}
+
+static const Result drawFrame(App *app)
+{
+        vkWaitForFences(app->device, 1, &app->inFlightFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(app->device, 1, &app->inFlightFence);
+
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(
+                app->device,
+                app->swapchain,
+                UINT64_MAX,
+                app->imageAvailableSemaphore,
+                NULL,
+                &imageIndex
+        );
+
+        vkResetCommandBuffer(app->commandBuffer, 0);
+        recordCommandBuffer(app, app->commandBuffer, imageIndex);
+
+        const VkSemaphore waitSemaphores[] = { app->imageAvailableSemaphore };
+        const VkPipelineStageFlags waitStages[] = {
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        };
+
+        const VkSemaphore signalSemaphores[] = { app->renderFinishedSemaphore };
+
+        const VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = waitSemaphores,
+                .pWaitDstStageMask = waitStages,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &app->commandBuffer,
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = signalSemaphores,
+        };
+
+        const VkResult submitResult = vkQueueSubmit(
+                app->graphicsQueue,
+                1,
+                &submitInfo,
+                app->inFlightFence
+        );
+
+        if (submitResult != VK_SUCCESS)
+                return RESULT_ERROR(submitResult, "failed to submit draw command buffer!");
+
+        const VkSwapchainKHR swapchains[] = { app->swapchain };
+        const VkPresentInfoKHR presentInfo = {
+                .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = signalSemaphores,
+                .swapchainCount = 1,
+                .pSwapchains = swapchains,
+                .pImageIndices = &imageIndex,
+                .pResults = NULL, // optional
+        };
+
+        vkQueuePresentKHR(app->presentQueue, &presentInfo);
+
         return RESULT_SUCCESS;
 }
 
@@ -928,19 +1148,33 @@ static const Result mainLoop(App *app)
 {
         while (!glfwWindowShouldClose(app->window)) {
                 glfwPollEvents();
+                drawFrame(app);
         }
+
+        vkDeviceWaitIdle(app->device);
         return RESULT_SUCCESS;
 }
 
 static const Result cleanUp(App *app)
 {
+        vkDestroySemaphore(app->device, app->imageAvailableSemaphore, NULL);
+        vkDestroySemaphore(app->device, app->renderFinishedSemaphore, NULL);
+        vkDestroyFence(app->device, app->inFlightFence, NULL);
+
+        vkDestroyCommandPool(app->device, app->commandPool, NULL);
+
+        for (int i = 0; i < app->swapchainImageCount; i++)
+                vkDestroyFramebuffer(app->device, app->swapchainFramebuffers[i], NULL);
+
+        free(app->swapchainFramebuffers);
+
         vkDestroyPipeline(app->device, app->graphicsPipeline, NULL);
         vkDestroyPipelineLayout(app->device, app->pipelineLayout, NULL);
         vkDestroyRenderPass(app->device, app->renderPass, NULL);
+
         for (int i = 0; i < app->swapchainImageCount; i++)
                 vkDestroyImageView(app->device, app->swapchainImageViews[i], NULL);
 
-        free(app->swapchainImageViews);
         free(app->swapchainImages);
 
         vkDestroySwapchainKHR(app->device, app->swapchain, NULL);
@@ -952,6 +1186,7 @@ static const Result cleanUp(App *app)
                         NULL
                 );
         }
+
         vkDestroyDevice(app->device, NULL);
         vkDestroySurfaceKHR(app->instance, app->surface, NULL);
         vkDestroyInstance(app->instance, NULL);

@@ -18,6 +18,8 @@
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
 
+static const int MAX_FRAMES_IN_FLIGHT = 2;
+
 #define RESULT_ERROR(c, msg) (Result) { .code = c, .data = msg }
 
 const Result RESULT_SUCCESS = (Result) {
@@ -936,19 +938,20 @@ static const Result createCommandPool(App *app)
         return RESULT_SUCCESS;
 }
 
-static const Result createCommandBuffer(App *app)
+static const Result createCommandBuffers(App *app)
 {
+        app->commandBuffers = malloc(sizeof(VkCommandBuffer) * MAX_FRAMES_IN_FLIGHT);
         const VkCommandBufferAllocateInfo allocInfo = {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                 .commandPool = app->commandPool,
                 .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1,
+                .commandBufferCount = MAX_FRAMES_IN_FLIGHT,
         };
 
         const VkResult result = vkAllocateCommandBuffers(
                 app->device,
                 &allocInfo,
-                &app->commandBuffer
+                app->commandBuffers
         );
 
         if (result != VK_SUCCESS)
@@ -1022,6 +1025,9 @@ static const Result recordCommandBuffer(
 
 static const Result createSyncObjects(App *app)
 {
+        app->imageAvailableSemaphores = malloc(sizeof(VkSemaphore) * MAX_FRAMES_IN_FLIGHT);
+        app->renderFinishedSemaphores= malloc(sizeof(VkSemaphore) * MAX_FRAMES_IN_FLIGHT);
+        app->inFlightFences = malloc(sizeof(VkFence) * MAX_FRAMES_IN_FLIGHT);
         VkSemaphoreCreateInfo semaphoreInfo = {
                 .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         };
@@ -1031,33 +1037,35 @@ static const Result createSyncObjects(App *app)
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT,
         };
 
-        const VkResult imageAvailableSemaphoreResult = vkCreateSemaphore(
-                app->device,
-                &semaphoreInfo,
-                NULL,
-                &app->imageAvailableSemaphore
-        );
-        const VkResult renderFinishedSemaphoreResult = vkCreateSemaphore(
-                app->device,
-                &semaphoreInfo,
-                NULL,
-                &app->renderFinishedSemaphore
-        );
-        const VkResult inFlightFenceResult = vkCreateFence(
-                app->device,
-                &fenceInfo,
-                NULL,
-                &app->inFlightFence
-        );
-
-        if (imageAvailableSemaphoreResult != VK_SUCCESS
-                && renderFinishedSemaphoreResult != VK_SUCCESS
-                && inFlightFenceResult != VK_SUCCESS
-        ) {
-                return RESULT_ERROR(
-                        inFlightFenceResult,
-                        "failed to create semaphores and fence!"
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                const VkResult imageAvailableSemaphoreResult = vkCreateSemaphore(
+                        app->device,
+                        &semaphoreInfo,
+                        NULL,
+                        &app->imageAvailableSemaphores[i]
                 );
+                const VkResult renderFinishedSemaphoreResult = vkCreateSemaphore(
+                        app->device,
+                        &semaphoreInfo,
+                        NULL,
+                        &app->renderFinishedSemaphores[i]
+                );
+                const VkResult inFlightFenceResult = vkCreateFence(
+                        app->device,
+                        &fenceInfo,
+                        NULL,
+                        &app->inFlightFences[i]
+                );
+
+                if (imageAvailableSemaphoreResult != VK_SUCCESS
+                        && renderFinishedSemaphoreResult != VK_SUCCESS
+                        && inFlightFenceResult != VK_SUCCESS
+                ) {
+                        return RESULT_ERROR(
+                                inFlightFenceResult,
+                                "failed to create semaphores and fence!"
+                        );
+                }
         }
 
         return RESULT_SUCCESS;
@@ -1077,35 +1085,35 @@ static const Result initVulkan(App *app)
         handle(createGraphicsPipeline(app));
         handle(createFramebuffers(app));
         handle(createCommandPool(app));
-        handle(createCommandBuffer(app));
+        handle(createCommandBuffers(app));
         handle(createSyncObjects(app));
         return RESULT_SUCCESS;
 }
 
-static const Result drawFrame(App *app)
+static const Result drawFrame(App *app, uint32_t *pCurrentFrame)
 {
-        vkWaitForFences(app->device, 1, &app->inFlightFence, VK_TRUE, UINT64_MAX);
-        vkResetFences(app->device, 1, &app->inFlightFence);
+        vkWaitForFences(app->device, 1, &app->inFlightFences[*pCurrentFrame], VK_TRUE, UINT64_MAX);
+        vkResetFences(app->device, 1, &app->inFlightFences[*pCurrentFrame]);
 
         uint32_t imageIndex;
         vkAcquireNextImageKHR(
                 app->device,
                 app->swapchain,
                 UINT64_MAX,
-                app->imageAvailableSemaphore,
+                app->imageAvailableSemaphores[*pCurrentFrame],
                 NULL,
                 &imageIndex
         );
 
-        vkResetCommandBuffer(app->commandBuffer, 0);
-        recordCommandBuffer(app, app->commandBuffer, imageIndex);
+        vkResetCommandBuffer(app->commandBuffers[*pCurrentFrame], 0);
+        recordCommandBuffer(app, app->commandBuffers[*pCurrentFrame], imageIndex);
 
-        const VkSemaphore waitSemaphores[] = { app->imageAvailableSemaphore };
+        const VkSemaphore waitSemaphores[] = { app->imageAvailableSemaphores[*pCurrentFrame] };
         const VkPipelineStageFlags waitStages[] = {
                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         };
 
-        const VkSemaphore signalSemaphores[] = { app->renderFinishedSemaphore };
+        const VkSemaphore signalSemaphores[] = { app->renderFinishedSemaphores[*pCurrentFrame] };
 
         const VkSubmitInfo submitInfo = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1113,7 +1121,7 @@ static const Result drawFrame(App *app)
                 .pWaitSemaphores = waitSemaphores,
                 .pWaitDstStageMask = waitStages,
                 .commandBufferCount = 1,
-                .pCommandBuffers = &app->commandBuffer,
+                .pCommandBuffers = &app->commandBuffers[*pCurrentFrame],
                 .signalSemaphoreCount = 1,
                 .pSignalSemaphores = signalSemaphores,
         };
@@ -1122,7 +1130,7 @@ static const Result drawFrame(App *app)
                 app->graphicsQueue,
                 1,
                 &submitInfo,
-                app->inFlightFence
+                app->inFlightFences[*pCurrentFrame]
         );
 
         if (submitResult != VK_SUCCESS)
@@ -1141,6 +1149,8 @@ static const Result drawFrame(App *app)
 
         vkQueuePresentKHR(app->presentQueue, &presentInfo);
 
+        *pCurrentFrame = (*pCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+
         return RESULT_SUCCESS;
 }
 
@@ -1148,7 +1158,8 @@ static const Result mainLoop(App *app)
 {
         while (!glfwWindowShouldClose(app->window)) {
                 glfwPollEvents();
-                drawFrame(app);
+                static uint32_t currentFrame = 0;
+                drawFrame(app, &currentFrame);
         }
 
         vkDeviceWaitIdle(app->device);
@@ -1157,9 +1168,15 @@ static const Result mainLoop(App *app)
 
 static const Result cleanUp(App *app)
 {
-        vkDestroySemaphore(app->device, app->imageAvailableSemaphore, NULL);
-        vkDestroySemaphore(app->device, app->renderFinishedSemaphore, NULL);
-        vkDestroyFence(app->device, app->inFlightFence, NULL);
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                vkDestroySemaphore(app->device, app->imageAvailableSemaphores[i], NULL);
+                vkDestroySemaphore(app->device, app->renderFinishedSemaphores[i], NULL);
+                vkDestroyFence(app->device, app->inFlightFences[i], NULL);
+        }
+
+        free(app->imageAvailableSemaphores);
+        free(app->renderFinishedSemaphores);
+        free(app->inFlightFences);
 
         vkDestroyCommandPool(app->device, app->commandPool, NULL);
 

@@ -25,10 +25,10 @@ typedef struct app {
         VkPipeline graphicsPipeline;
         VkFramebuffer *swapchainFramebuffers;
         VkCommandPool commandPool;
-        VkCommandBuffer commandBuffer;
-        VkSemaphore imageAvailableSemaphore;
-        VkSemaphore renderFinishedSemaphore;
-        VkFence inFlightFence;
+        VkCommandBuffer *commandBuffers;
+        VkSemaphore *imageAvailableSemaphores;
+        VkSemaphore *renderFinishedSemaphores;
+        VkFence *inFlightFences;
 } App;
 
 typedef struct result {

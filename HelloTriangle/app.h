@@ -19,6 +19,9 @@ typedef struct app {
         VkFormat swapchainImageFormat;
         VkExtent2D swapchainExtent;
         VkImageView *swapchainImageViews;
+        VkRenderPass renderPass;
+        VkPipelineLayout pipelineLayout;
+        VkPipeline graphicsPipeline;
 } App;
 
 typedef struct result {

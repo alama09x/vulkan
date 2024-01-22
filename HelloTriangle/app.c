@@ -3,6 +3,7 @@
 
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -286,21 +287,21 @@ static const bool isDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface
 
         bool extensionsSupported = checkDeviceExtensionSupport(device);
 
-        bool swapChainAdequate = false;
+        bool swapchainAdequate = false;
         if (extensionsSupported) {
-                SwapChainSupportDetails swapChainSupport = querySwapChainSupport(
+                SwapChainSupportDetails swapchainSupport = querySwapChainSupport(
                         device,
                         surface
                 );
 
-                swapChainAdequate =
-                        swapChainSupport.formatCount != 0
-                        && swapChainSupport.presentModeCount != 0;
+                swapchainAdequate =
+                        swapchainSupport.formatCount != 0
+                        && swapchainSupport.presentModeCount != 0;
         }
 
         return indicesComplete(indices)
                 && extensionsSupported
-                && swapChainAdequate;
+                && swapchainAdequate;
 }
 
 static const Result pickPhysicalDevice(App *app)
@@ -468,32 +469,32 @@ static const VkExtent2D chooseSwapExtent(
 
 static const Result createSwapChain(App *app)
 {
-        const SwapChainSupportDetails swapChainSupport = querySwapChainSupport(
+        const SwapChainSupportDetails swapchainSupport = querySwapChainSupport(
                 app->physicalDevice,
                 app->surface
         );
 
         const VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(
-                swapChainSupport.formats,
-                swapChainSupport.formatCount
+                swapchainSupport.formats,
+                swapchainSupport.formatCount
         );
 
         const VkPresentModeKHR presentMode = chooseSwapPresentMode(
-                swapChainSupport.presentModes,
-                swapChainSupport.presentModeCount
+                swapchainSupport.presentModes,
+                swapchainSupport.presentModeCount
         );
 
         const VkExtent2D extent = chooseSwapExtent(
                 app->window,
-                swapChainSupport.capabilities
+                swapchainSupport.capabilities
         );
 
-        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-        if (swapChainSupport.capabilities.maxImageCount > 0
-                && imageCount > swapChainSupport.capabilities.maxImageCount
+        uint32_t imageCount = swapchainSupport.capabilities.minImageCount + 1;
+        if (swapchainSupport.capabilities.maxImageCount > 0
+                && imageCount > swapchainSupport.capabilities.maxImageCount
         ) {
                 
-                imageCount = swapChainSupport.capabilities.maxImageCount;
+                imageCount = swapchainSupport.capabilities.maxImageCount;
         }
 
         QueueFamilyIndices indices = findQueueFamilies(
@@ -515,7 +516,7 @@ static const Result createSwapChain(App *app)
                 .imageExtent = extent,
                 .imageArrayLayers = 1,
                 .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                .preTransform = swapChainSupport.capabilities.currentTransform,
+                .preTransform = swapchainSupport.capabilities.currentTransform,
                 .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
                 .presentMode = presentMode,
                 .clipped = VK_TRUE,
@@ -535,7 +536,7 @@ static const Result createSwapChain(App *app)
                 app->device,
                 &createInfo,
                 NULL,
-                &app->swapChain
+                &app->swapchain
         );
 
         if (result != VK_SUCCESS) {
@@ -544,7 +545,69 @@ static const Result createSwapChain(App *app)
                         .data = "failed to create swap chain!",
                 };
         }
+
+        vkGetSwapchainImagesKHR(app->device, app->swapchain, &imageCount, NULL);
+        app->swapchainImageCount = imageCount;
+
+        app->swapchainImages = malloc(sizeof(VkImage) * app->swapchainImageCount);
         
+        vkGetSwapchainImagesKHR(
+                app->device,
+                app->swapchain,
+                &app->swapchainImageCount,
+                app->swapchainImages
+        );
+
+
+        app->swapchainImageFormat = surfaceFormat.format;
+        app->swapchainExtent = extent;
+        
+        return RESULT_SUCCESS;
+}
+
+static const Result createImageViews(App *app)
+{
+        app->swapchainImageViews = malloc(sizeof(VkImage) * app->swapchainImageCount);
+        for (int i = 0; i < app->swapchainImageCount; i++) {
+                VkImageViewCreateInfo createInfo = {
+                        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                        .image = app->swapchainImages[i],
+                        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                        .format = app->swapchainImageFormat,
+                        .components = (VkComponentMapping) {
+                                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                                .g= VK_COMPONENT_SWIZZLE_IDENTITY,
+                                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                        },
+                        .subresourceRange = (VkImageSubresourceRange) {
+                                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                .baseMipLevel = 0,
+                                .levelCount = 1,
+                                .baseArrayLayer = 0,
+                                .layerCount = 1,
+                        },
+                };
+
+                VkResult result = vkCreateImageView(
+                        app->device,
+                        &createInfo,
+                        NULL,
+                        &app->swapchainImageViews[i]
+                );
+
+                if (result != VK_SUCCESS) {
+                        return (Result) {
+                                .code = result,
+                                .data = "failed to create image views!",
+                        };
+                }
+        }
+        return RESULT_SUCCESS;
+}
+
+static const Result createGraphicsPipeline(App *app)
+{
         return RESULT_SUCCESS;
 }
 
@@ -557,6 +620,8 @@ static const Result initVulkan(App *app)
         handle(pickPhysicalDevice(app));
         handle(createLogicalDevice(app));
         handle(createSwapChain(app));
+        handle(createImageViews(app));
+        handle(createGraphicsPipeline(app));
         return RESULT_SUCCESS;
 }
 
@@ -570,7 +635,14 @@ static const Result mainLoop(App *app)
 
 static const Result cleanUp(App *app)
 {
-        vkDestroySwapchainKHR(app->device, app->swapChain, NULL);
+        for (int i = 0; i < app->swapchainImageCount; i++)
+                vkDestroyImageView(app->device, app->swapchainImageViews[i], NULL);
+
+        free(app->swapchainImageViews);
+        free(app->swapchainImages);
+
+        vkDestroySwapchainKHR(app->device, app->swapchain, NULL);
+
         if (ENABLE_VALIDATION_LAYERS) {
                 destroyDebugUtilsMessengerEXT(
                         app->instance,

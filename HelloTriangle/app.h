@@ -13,7 +13,12 @@ typedef struct app {
         VkDevice device;
         VkQueue graphicsQueue;
         VkQueue presentQueue;
-        VkSwapchainKHR swapChain;
+        VkSwapchainKHR swapchain;
+        uint32_t swapchainImageCount;
+        VkImage *swapchainImages;
+        VkFormat swapchainImageFormat;
+        VkExtent2D swapchainExtent;
+        VkImageView *swapchainImageViews;
 } App;
 
 typedef struct result {

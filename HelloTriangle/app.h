@@ -25,6 +25,8 @@ typedef struct app {
         VkPipeline graphicsPipeline;
         VkFramebuffer *swapchainFramebuffers;
         VkCommandPool commandPool;
+        VkBuffer vertexBuffer;
+        VkDeviceMemory vertexBufferMemory;
         VkCommandBuffer *commandBuffers;
         VkSemaphore *imageAvailableSemaphores;
         VkSemaphore *renderFinishedSemaphores;

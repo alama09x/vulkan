@@ -1,13 +1,13 @@
 #include "app.h"
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-#include <stdbool.h>
+#include <cglm/call.h>
+
+#include <cglm/types.h>
 #include <stddef.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <vulkan/vulkan_core.h>
 
 #define handle(result) \
         res = result; \
@@ -42,7 +42,48 @@ static const char *const DEVICE_EXTENSIONS[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 };
 
-const bool checkValidationLayerSupport()
+typedef struct {
+        vec2 pos;
+        vec3 color;
+} Vertex;
+
+const uint32_t VERTEX_COUNT = 3;
+static const Vertex VERTICES[] = {
+        (Vertex) { .pos = {0.0f, -0.5f}, .color = {1.0f, 1.0f, 1.0f} },
+        (Vertex) { .pos = {0.5f, 0.5f}, .color = {0.0f, 1.0f, 0.0f} },
+        (Vertex) { .pos = {-0.5f, 0.5f}, .color = {0.0f, 0.0f, 1.0f} },
+};
+
+static const VkVertexInputBindingDescription vertexGetBindingDescription()
+{
+        const VkVertexInputBindingDescription bindingDescription = {
+                .binding = 0,
+                .stride = sizeof(Vertex),
+                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        };
+
+        return bindingDescription;
+}
+
+static void vertexGetAttributeDescriptions(
+        VkVertexInputAttributeDescription pDescriptions[2]
+) {
+        pDescriptions[0] = (VkVertexInputAttributeDescription) {
+                .binding = 0,
+                .location = 0,
+                .format = VK_FORMAT_R32G32_SFLOAT,
+                .offset = offsetof(Vertex, pos),
+        };
+
+        pDescriptions[1] = (VkVertexInputAttributeDescription) {
+                .binding = 0,
+                .location = 1,
+                .format = VK_FORMAT_R32G32B32_SFLOAT,
+                .offset = offsetof(Vertex, color),
+        };
+}
+
+static const bool checkValidationLayerSupport()
 {
         uint32_t layerCount;
         vkEnumerateInstanceLayerProperties(&layerCount, NULL);
@@ -873,12 +914,17 @@ static const Result createGraphicsPipeline(App *app)
                 fragShaderStageInfo,
         };
 
+        const VkVertexInputBindingDescription bindingDesc = vertexGetBindingDescription();
+        uint32_t attrDescCount = 2;
+        VkVertexInputAttributeDescription attrDescs[attrDescCount];
+        vertexGetAttributeDescriptions(attrDescs);
+
         const VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                .vertexBindingDescriptionCount = 0,
-                .pVertexBindingDescriptions = NULL, // optional
-                .vertexAttributeDescriptionCount = 0,
-                .pVertexAttributeDescriptions = NULL, // optional
+                .vertexBindingDescriptionCount = 1,
+                .pVertexBindingDescriptions = &bindingDesc,
+                .vertexAttributeDescriptionCount = attrDescCount,
+                .pVertexAttributeDescriptions = attrDescs,
         };
 
         const VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
@@ -1071,6 +1117,87 @@ static const Result createCommandPool(App *app)
         return RESULT_SUCCESS;
 }
 
+static const Result findMemoryType(
+        const VkPhysicalDevice physicalDevice,
+        const uint32_t typeFilter,
+        const VkMemoryPropertyFlags properties,
+        uint32_t *pMemType
+) {
+        VkPhysicalDeviceMemoryProperties memProperties;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+                if (typeFilter & (1 << i)
+                        && (memProperties.memoryTypes[i].propertyFlags & properties)
+                                == properties
+                ) {
+                        *pMemType = i;
+                        return RESULT_SUCCESS;
+                }
+        }
+
+        return RESULT_ERROR(-1, "failed to find suitable memory type!");
+}
+
+static const Result createVertexBuffer(App *app)
+{
+        const VkBufferCreateInfo createInfo = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = sizeof(VERTICES[0]) * VERTEX_COUNT,
+                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+
+        const VkResult createResult = vkCreateBuffer(
+                app->device,
+                &createInfo,
+                NULL,
+                &app->vertexBuffer
+        );
+
+        if (createResult != VK_SUCCESS)
+                return RESULT_ERROR(createResult, "failed to create vertex buffer!");
+
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(app->device, app->vertexBuffer, &memRequirements);
+
+        uint32_t memType;
+        const Result memTypeResult = findMemoryType(
+                app->physicalDevice,
+                memRequirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &memType
+        );
+
+        if (memTypeResult.code != 0)
+                return memTypeResult;
+
+        const VkMemoryAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = memRequirements.size,
+                .memoryTypeIndex = memType,
+        };
+
+        const VkResult allocResult = vkAllocateMemory(
+                app->device,
+                &allocInfo,
+                NULL,
+                &app->vertexBufferMemory
+        );
+
+        if (allocResult != VK_SUCCESS)
+                return RESULT_ERROR(allocResult, "failed to allocate vertex buffer memory!");
+        
+        vkBindBufferMemory(app->device, app->vertexBuffer, app->vertexBufferMemory, 0);
+
+        void *data;
+        vkMapMemory(app->device, app->vertexBufferMemory, 0, createInfo.size, 0, &data);
+        memcpy(data, VERTICES, (size_t) createInfo.size);
+        vkUnmapMemory(app->device, app->vertexBufferMemory);
+        return RESULT_SUCCESS;
+}
+
 static const Result createCommandBuffers(App *app)
 {
         app->commandBuffers = malloc(sizeof(VkCommandBuffer) * MAX_FRAMES_IN_FLIGHT);
@@ -1128,6 +1255,10 @@ static const Result recordCommandBuffer(
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
 
+        const VkBuffer vertexBuffers[] = { app->vertexBuffer };
+        const VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
         const VkViewport viewport = {
                 .x = 0.0f,
                 .y = 0.0f,
@@ -1145,7 +1276,7 @@ static const Result recordCommandBuffer(
         };
 
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        vkCmdDraw(commandBuffer, VERTEX_COUNT, 1, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 
@@ -1218,6 +1349,7 @@ static const Result initVulkan(App *app)
         handle(createGraphicsPipeline(app));
         handle(createFramebuffers(app));
         handle(createCommandPool(app));
+        handle(createVertexBuffer(app));
         handle(createCommandBuffers(app));
         handle(createSyncObjects(app));
         return RESULT_SUCCESS;
@@ -1378,6 +1510,9 @@ static const Result cleanUp(App *app)
         vkDestroyCommandPool(app->device, app->commandPool, NULL);
 
         cleanUpSwapchain(app);
+
+        vkDestroyBuffer(app->device, app->vertexBuffer, NULL);
+        vkFreeMemory(app->device, app->vertexBufferMemory, NULL);
 
         vkDestroyPipeline(app->device, app->graphicsPipeline, NULL);
         vkDestroyPipelineLayout(app->device, app->pipelineLayout, NULL);

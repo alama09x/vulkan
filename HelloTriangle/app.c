@@ -1,6 +1,6 @@
 #include "app.h"
-#include "validation.h"
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vulkan/vulkan_core.h>
 
 #define handle(result) \
         res = result; \
@@ -27,17 +26,151 @@ const Result RESULT_SUCCESS = (Result) {
         .data = NULL,
 };
 
-#define DEVICE_EXTENSION_COUNT 1
-const char *const DEVICE_EXTENSIONS[DEVICE_EXTENSION_COUNT] = {
+static const uint32_t VALIDATION_LAYER_COUNT = 1;
+static const char *const VALIDATION_LAYERS[] = {
+        "VK_LAYER_KHRONOS_validation",
+};
+
+#ifdef NDEBUG
+        static const bool ENABLE_VALIDATION_LAYERS = false;
+#else
+        static const bool ENABLE_VALIDATION_LAYERS = true;
+#endif
+
+static const uint32_t DEVICE_EXTENSION_COUNT = 1;
+static const char *const DEVICE_EXTENSIONS[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 };
+
+const bool checkValidationLayerSupport()
+{
+        uint32_t layerCount;
+        vkEnumerateInstanceLayerProperties(&layerCount, NULL);
+
+        VkLayerProperties availableLayers[layerCount];
+        vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
+
+        for (int i = 0; i < VALIDATION_LAYER_COUNT; i++) {
+                bool layerFound = false;
+
+                for (int j = 0; j < layerCount; j++) {
+                        if (strncmp(
+                                VALIDATION_LAYERS[i],
+                                availableLayers[j].layerName,
+                                64
+                        ) == 0) {
+                                layerFound = true;
+                                break;
+                        }
+                }
+
+                if (!layerFound)
+                        return false;
+        }
+
+        return true;
+}
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+        VkDebugUtilsMessageTypeFlagsEXT type,
+        const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
+        void *pUserData
+) {
+        fprintf(stderr, "Validation layer: %s\n", pCallbackData->pMessage);
+
+        return VK_FALSE;
+}
+
+static const VkResult createDebugUtilsMessengerEXT(
+        VkInstance instance,
+        const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkDebugUtilsMessengerEXT *pDebugMessenger
+) {
+        #define T PFN_vkCreateDebugUtilsMessengerEXT
+        T function = (T) vkGetInstanceProcAddr(
+                instance,
+                "vkCreateDebugUtilsMessengerEXT"
+        );
+        #undef T
+
+        if (function)
+                return function(instance, pCreateInfo, pAllocator, pDebugMessenger);
+        else
+                return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+void destroyDebugUtilsMessengerEXT(
+        VkInstance instance,
+        VkDebugUtilsMessengerEXT debugMessenger,
+        const VkAllocationCallbacks* pAllocator
+) {
+        #define T PFN_vkDestroyDebugUtilsMessengerEXT
+        T function = (T) vkGetInstanceProcAddr(
+                instance,
+                "vkDestroyDebugUtilsMessengerEXT"
+        );
+        #undef T
+
+        if (function)
+                function(instance, debugMessenger, pAllocator);
+}
+
+const VkDebugUtilsMessengerCreateInfoEXT setupDebugMessengerCreateInfo()
+{
+
+        return (VkDebugUtilsMessengerCreateInfoEXT) {
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                .messageSeverity =
+                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+                        | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                        | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+                .messageType =
+                        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+                        | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                        | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+                .pfnUserCallback = debugCallback,
+        };
+}
+
+const Result setupDebugMessenger(App *app)
+{
+        if (!ENABLE_VALIDATION_LAYERS)
+                return RESULT_SUCCESS;
+
+        VkDebugUtilsMessengerCreateInfoEXT createInfo =
+                setupDebugMessengerCreateInfo();
+
+        const VkResult res = createDebugUtilsMessengerEXT(
+                app->instance,
+                &createInfo,
+                NULL,
+                &app->debugMessenger
+        );
+
+        if (res != VK_SUCCESS) {
+                return (Result) {
+                        .code = res,
+                        .data = "failed to set up debug messenger!",
+                };
+        }
+        return RESULT_SUCCESS;
+}
+
+static void framebufferResizeCallback(GLFWwindow *window, int w, int h)
+{
+        App *app = glfwGetWindowUserPointer(window);
+        app->framebufferResized = true;
+}
 
 static const Result initWindow(App *app)
 {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         app->window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", NULL, NULL);
+        glfwSetWindowUserPointer(app->window, app);
+        glfwSetFramebufferSizeCallback(app->window, framebufferResizeCallback);
         return RESULT_SUCCESS;
 }
 
@@ -447,7 +580,7 @@ static const VkExtent2D chooseSwapExtent(
         };
 }
 
-static const Result createSwapChain(App *app)
+static const Result createSwapchain(App *app)
 {
         const SwapChainSupportDetails swapchainSupport = querySwapChainSupport(
                 app->physicalDevice,
@@ -1079,7 +1212,7 @@ static const Result initVulkan(App *app)
         handle(createSurface(app));
         handle(pickPhysicalDevice(app));
         handle(createLogicalDevice(app));
-        handle(createSwapChain(app));
+        handle(createSwapchain(app));
         handle(createImageViews(app));
         handle(createRenderPass(app));
         handle(createGraphicsPipeline(app));
@@ -1090,13 +1223,52 @@ static const Result initVulkan(App *app)
         return RESULT_SUCCESS;
 }
 
+static const Result cleanUpSwapchain(App *app)
+{
+
+        for (int i = 0; i < app->swapchainImageCount; i++)
+                vkDestroyFramebuffer(app->device, app->swapchainFramebuffers[i], NULL);
+
+        free(app->swapchainFramebuffers);
+
+        for (int i = 0; i < app->swapchainImageCount; i++)
+                vkDestroyImageView(app->device, app->swapchainImageViews[i], NULL);
+
+        free(app->swapchainImages);
+
+        vkDestroySwapchainKHR(app->device, app->swapchain, NULL);
+
+        return RESULT_SUCCESS;
+}
+
+static const Result recreateSwapchain(App *app)
+{
+        int width = 0;
+        int height = 0;
+        glfwGetFramebufferSize(app->window, &width, &height);
+        while (width == 0 || height == 0) {
+                glfwGetFramebufferSize(app->window, &width, &height);
+                glfwWaitEvents();
+        }
+
+        vkDeviceWaitIdle(app->device);
+
+        cleanUpSwapchain(app);
+
+        Result res;
+        handle(createSwapchain(app));
+        handle(createImageViews(app));
+        handle(createFramebuffers(app));
+
+        return RESULT_SUCCESS;
+}
+
 static const Result drawFrame(App *app, uint32_t *pCurrentFrame)
 {
         vkWaitForFences(app->device, 1, &app->inFlightFences[*pCurrentFrame], VK_TRUE, UINT64_MAX);
-        vkResetFences(app->device, 1, &app->inFlightFences[*pCurrentFrame]);
 
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(
+        const VkResult acquireImageResult = vkAcquireNextImageKHR(
                 app->device,
                 app->swapchain,
                 UINT64_MAX,
@@ -1104,6 +1276,18 @@ static const Result drawFrame(App *app, uint32_t *pCurrentFrame)
                 NULL,
                 &imageIndex
         );
+
+        if (acquireImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
+                recreateSwapchain(app);
+                return RESULT_SUCCESS;
+        } else if (acquireImageResult != VK_SUCCESS
+                && acquireImageResult != VK_SUBOPTIMAL_KHR
+        ) {
+                return RESULT_ERROR(acquireImageResult, "failed to acquire swapchain image!");
+        }
+
+        // Only reset the fence if work is being submitted
+        vkResetFences(app->device, 1, &app->inFlightFences[*pCurrentFrame]);
 
         vkResetCommandBuffer(app->commandBuffers[*pCurrentFrame], 0);
         recordCommandBuffer(app, app->commandBuffers[*pCurrentFrame], imageIndex);
@@ -1147,7 +1331,20 @@ static const Result drawFrame(App *app, uint32_t *pCurrentFrame)
                 .pResults = NULL, // optional
         };
 
-        vkQueuePresentKHR(app->presentQueue, &presentInfo);
+        const VkResult presentResult = vkQueuePresentKHR(
+                app->presentQueue,
+                &presentInfo
+        );
+
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR
+                || presentResult == VK_SUBOPTIMAL_KHR
+                || app->framebufferResized
+        ) {
+                app->framebufferResized = false;
+                recreateSwapchain(app);
+        } else if (presentResult != VK_SUCCESS) {
+                return RESULT_ERROR(presentResult, "failed to rpesent swapchain image!");
+        }
 
         *pCurrentFrame = (*pCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
@@ -1180,21 +1377,14 @@ static const Result cleanUp(App *app)
 
         vkDestroyCommandPool(app->device, app->commandPool, NULL);
 
-        for (int i = 0; i < app->swapchainImageCount; i++)
-                vkDestroyFramebuffer(app->device, app->swapchainFramebuffers[i], NULL);
-
-        free(app->swapchainFramebuffers);
+        cleanUpSwapchain(app);
 
         vkDestroyPipeline(app->device, app->graphicsPipeline, NULL);
         vkDestroyPipelineLayout(app->device, app->pipelineLayout, NULL);
+
         vkDestroyRenderPass(app->device, app->renderPass, NULL);
 
-        for (int i = 0; i < app->swapchainImageCount; i++)
-                vkDestroyImageView(app->device, app->swapchainImageViews[i], NULL);
-
-        free(app->swapchainImages);
-
-        vkDestroySwapchainKHR(app->device, app->swapchain, NULL);
+        vkDestroyDevice(app->device, NULL);
 
         if (ENABLE_VALIDATION_LAYERS) {
                 destroyDebugUtilsMessengerEXT(
@@ -1204,9 +1394,9 @@ static const Result cleanUp(App *app)
                 );
         }
 
-        vkDestroyDevice(app->device, NULL);
         vkDestroySurfaceKHR(app->instance, app->surface, NULL);
         vkDestroyInstance(app->instance, NULL);
+
         glfwDestroyWindow(app->window);
         glfwTerminate();
         return RESULT_SUCCESS;

@@ -1,9 +1,9 @@
 #ifndef APP_H
 #define APP_H
 
-#include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <stdbool.h>
 
 typedef struct app {
         GLFWwindow *window;
@@ -29,6 +29,7 @@ typedef struct app {
         VkSemaphore *imageAvailableSemaphores;
         VkSemaphore *renderFinishedSemaphores;
         VkFence *inFlightFences;
+        bool framebufferResized;
 } App;
 
 typedef struct result {

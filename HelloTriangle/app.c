@@ -1139,12 +1139,19 @@ static const Result findMemoryType(
         return RESULT_ERROR(-1, "failed to find suitable memory type!");
 }
 
-static const Result createVertexBuffer(App *app)
-{
+static const Result createBuffer(
+        App *app,
+        const VkDeviceSize size,
+        const VkBufferUsageFlags usage,
+        const VkMemoryPropertyFlags properties,
+        VkBuffer *pBuffer,
+        VkDeviceMemory *pBufferMemory
+) {
+        
         const VkBufferCreateInfo createInfo = {
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = sizeof(VERTICES[0]) * VERTEX_COUNT,
-                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                .size = size,
+                .usage = usage,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
 
@@ -1152,21 +1159,20 @@ static const Result createVertexBuffer(App *app)
                 app->device,
                 &createInfo,
                 NULL,
-                &app->vertexBuffer
+                pBuffer
         );
 
         if (createResult != VK_SUCCESS)
-                return RESULT_ERROR(createResult, "failed to create vertex buffer!");
+                return RESULT_ERROR(createResult, "failed to create buffer!");
 
         VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(app->device, app->vertexBuffer, &memRequirements);
+        vkGetBufferMemoryRequirements(app->device, *pBuffer, &memRequirements);
 
         uint32_t memType;
         const Result memTypeResult = findMemoryType(
                 app->physicalDevice,
                 memRequirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                properties,
                 &memType
         );
 
@@ -1183,18 +1189,105 @@ static const Result createVertexBuffer(App *app)
                 app->device,
                 &allocInfo,
                 NULL,
-                &app->vertexBufferMemory
+                pBufferMemory
         );
 
         if (allocResult != VK_SUCCESS)
-                return RESULT_ERROR(allocResult, "failed to allocate vertex buffer memory!");
+                return RESULT_ERROR(allocResult, "failed to allocate buffer memory!");
         
-        vkBindBufferMemory(app->device, app->vertexBuffer, app->vertexBufferMemory, 0);
+        vkBindBufferMemory(app->device, *pBuffer, *pBufferMemory, 0);
+
+        return RESULT_SUCCESS;
+}
+
+static const Result copyBuffer(
+        App *app,
+        VkBuffer srcBuffer,
+        VkBuffer dstBuffer,
+        VkDeviceSize size
+) {
+        const VkCommandBufferAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandPool = app->commandPool,
+                .commandBufferCount = 1,
+        };
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(app->device, &allocInfo, &commandBuffer);
+
+        const VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        };
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        const VkBufferCopy copyRegion = {
+                .srcOffset = 0, // optional
+                .dstOffset = 0, // optional
+                .size = size,
+        };
+
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+        vkEndCommandBuffer(commandBuffer);
+
+        const VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffer,
+        };
+
+        vkQueueSubmit(app->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(app->graphicsQueue);
+
+        vkFreeCommandBuffers(app->device, app->commandPool, 1, &commandBuffer);
+
+        return RESULT_SUCCESS;
+}
+
+static const Result createVertexBuffer(App *app)
+{
+        const VkDeviceSize bufferSize = sizeof(Vertex) * VERTEX_COUNT;
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        const Result sBufResult = createBuffer(
+                app,
+                bufferSize,
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &stagingBuffer,
+                &stagingBufferMemory
+        );
+
+        if (sBufResult.code != 0)
+                return sBufResult;
 
         void *data;
-        vkMapMemory(app->device, app->vertexBufferMemory, 0, createInfo.size, 0, &data);
-        memcpy(data, VERTICES, (size_t) createInfo.size);
-        vkUnmapMemory(app->device, app->vertexBufferMemory);
+        vkMapMemory(app->device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, VERTICES, (size_t) bufferSize);
+        vkUnmapMemory(app->device, stagingBufferMemory);
+
+        const Result vBufResult = createBuffer(
+                app,
+                bufferSize,
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                        | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &app->vertexBuffer,
+                &app->vertexBufferMemory
+        );
+
+        if (vBufResult.code != 0)
+                return vBufResult;
+
+        copyBuffer(app, stagingBuffer, app->vertexBuffer, bufferSize);
+
+        vkDestroyBuffer(app->device, stagingBuffer, NULL);
+        vkFreeMemory(app->device, stagingBufferMemory, NULL);
         return RESULT_SUCCESS;
 }
 

@@ -47,11 +47,18 @@ typedef struct {
         vec3 color;
 } Vertex;
 
-const uint32_t VERTEX_COUNT = 3;
+const uint32_t VERTEX_COUNT = 4;
 static const Vertex VERTICES[] = {
-        (Vertex) { .pos = {0.0f, -0.5f}, .color = {1.0f, 1.0f, 1.0f} },
-        (Vertex) { .pos = {0.5f, 0.5f}, .color = {0.0f, 1.0f, 0.0f} },
-        (Vertex) { .pos = {-0.5f, 0.5f}, .color = {0.0f, 0.0f, 1.0f} },
+        (Vertex) { .pos = {-0.5f, -0.5f}, .color = {1.0f, 0.0f, 0.0f} },
+        (Vertex) { .pos = {0.5f, -0.5f}, .color = {0.0f, 1.0f, 0.0f} },
+        (Vertex) { .pos = {0.5f, 0.5f}, .color = {0.0f, 0.0f, 1.0f} },
+        (Vertex) { .pos = {-0.5f, 0.5f}, .color = {1.0f, 1.0f, 1.0f} },
+};
+
+const uint32_t INDEX_COUNT = 6;
+static const uint16_t INDICES[] = {
+        0, 1, 2,
+        2, 3, 0,
 };
 
 static const VkVertexInputBindingDescription vertexGetBindingDescription()
@@ -1291,6 +1298,50 @@ static const Result createVertexBuffer(App *app)
         return RESULT_SUCCESS;
 }
 
+static const Result createIndexBuffer(App *app)
+{
+        VkDeviceSize bufferSize = sizeof(INDICES[0]) * INDEX_COUNT;
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        const Result sBufResult = createBuffer(
+                app,
+                bufferSize,
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &stagingBuffer,
+                &stagingBufferMemory
+        );
+
+        if (sBufResult.code != 0)
+                return sBufResult;
+
+        void *data;
+        vkMapMemory(app->device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, INDICES, (size_t) bufferSize);
+        vkUnmapMemory(app->device, stagingBufferMemory);
+
+        const Result iBufResult = createBuffer(
+                app,
+                bufferSize,
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                        | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &app->indexBuffer,
+                &app->indexBufferMemory
+        );
+
+        if (iBufResult.code != 0)
+                return iBufResult;
+
+        copyBuffer(app, stagingBuffer, app->indexBuffer, bufferSize);
+
+        vkDestroyBuffer(app->device, stagingBuffer, NULL);
+        vkFreeMemory(app->device, stagingBufferMemory, NULL);
+        return RESULT_SUCCESS;
+}
+
 static const Result createCommandBuffers(App *app)
 {
         app->commandBuffers = malloc(sizeof(VkCommandBuffer) * MAX_FRAMES_IN_FLIGHT);
@@ -1351,6 +1402,7 @@ static const Result recordCommandBuffer(
         const VkBuffer vertexBuffers[] = { app->vertexBuffer };
         const VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, app->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
         const VkViewport viewport = {
                 .x = 0.0f,
@@ -1369,7 +1421,7 @@ static const Result recordCommandBuffer(
         };
 
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-        vkCmdDraw(commandBuffer, VERTEX_COUNT, 1, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, INDEX_COUNT, 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 
@@ -1443,6 +1495,7 @@ static const Result initVulkan(App *app)
         handle(createFramebuffers(app));
         handle(createCommandPool(app));
         handle(createVertexBuffer(app));
+        handle(createIndexBuffer(app));
         handle(createCommandBuffers(app));
         handle(createSyncObjects(app));
         return RESULT_SUCCESS;
@@ -1603,6 +1656,9 @@ static const Result cleanUp(App *app)
         vkDestroyCommandPool(app->device, app->commandPool, NULL);
 
         cleanUpSwapchain(app);
+
+        vkDestroyBuffer(app->device, app->indexBuffer, NULL);
+        vkFreeMemory(app->device, app->indexBufferMemory, NULL);
 
         vkDestroyBuffer(app->device, app->vertexBuffer, NULL);
         vkFreeMemory(app->device, app->vertexBufferMemory, NULL);

@@ -27,6 +27,8 @@ typedef struct app {
         VkCommandPool commandPool;
         VkBuffer vertexBuffer;
         VkDeviceMemory vertexBufferMemory;
+        VkBuffer indexBuffer;
+        VkDeviceMemory indexBufferMemory;
         VkCommandBuffer *commandBuffers;
         VkSemaphore *imageAvailableSemaphores;
         VkSemaphore *renderFinishedSemaphores;
